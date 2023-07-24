@@ -1,0 +1,97 @@
+library(readxl)
+library(survival)
+library(ggplot2)
+library(shiny)
+library(dplyr)
+
+
+data1 <- read_xlsx("clinical_data.xlsx")
+
+# str(data1)
+# Set type to a factor
+data1 <- mutate(data1, across(where(is.character), as.factor))
+n_total <- nrow(data1)
+
+# Have a single time of event (censor or death)
+data1 <- data1 |>
+  mutate(
+    day_obs = if_else(`Vital Status` == "Dead", days_to_death, days_to_last_follow_up),
+    death = as.numeric(`Vital Status` == "Dead")
+  ) |>
+  as.data.frame()
+
+# parts of app
+
+ui <- shinyUI(navbarPage(
+  "Survival Analysis",
+  tabPanel(
+    "Kaplan-Meier Survival Graph",
+    sidebarLayout(
+      sidebarPanel(
+        h3("Survivial Graph"),
+        # SelectInput gives you the option to choose the variable you want to observe in a dropdown list
+        selectInput('sur_var', 'Factor of Survival', names(data1)[names(data1) != "patient" &
+                                                                    names(data1) != "Vital Status" &
+                                                                    names(data1) != "days_to_death" &
+                                                                    names(data1) != "days_to_last_follow_up" &
+                                                                    names(data1) != "day_obs" & names(data1) != "death"], ),
+        # SliderInput, in this case, let you select the time point you want to observe
+        sliderInput(
+          'xvalue',
+          'Survival Days = ',
+          value = 100,
+          min = 1,
+          max = max(data1$day_obs, na.rm = TRUE)
+        )
+      )
+      ,
+      mainPanel(
+        h3(textOutput("caption")),
+        plotOutput("plot1")
+        ,
+        verbatimTextOutput("center")
+      )
+    )
+  )
+))
+
+server <- function(input, output, session) {
+  # This is a caption that will show on top of the graph; the name will change based on which variable you choose
+  output$caption <- renderText({
+    paste("Survival Graph of", input$sur_var, sep = "\n")
+  })
+  
+  # Running the survival function
+  runSur <- reactive({
+    survfit(Surv(day_obs, death) ~ data1[[input$sur_var]], data = data1)
+  })
+  
+  # Plot the survival graph
+  output$plot1 <- renderPlot({
+    plot(
+      runSur(),
+      col = c("red", "sky blue", "green", "purple", "orange", "yellow"),
+      xlab = "Days",
+      ylab = "S(t)"
+    )
+    legend(
+      "bottomleft",
+      cex = 0.9,
+      legend = levels(data1[[input$sur_var]]),
+      fill = c("red", "sky blue", "green", "purple", "orange", "yellow")
+    )
+    abline(v = input$xvalue,
+           col = 1,
+           lty = 2)
+  })
+  
+  # This table will give you the probability of survival for each class at a given time
+  output$center <- renderPrint({
+    summary(runSur(), times = input$xvalue, extend = TRUE)
+  })
+  
+  
+}
+
+
+shinyApp(ui = ui, server = server)
